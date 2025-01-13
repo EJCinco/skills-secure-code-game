@@ -24,68 +24,62 @@ var reqBody struct {
 }
 
 func isValidEmail(email string) bool {
-	// The provided regular expression pattern for email validation by OWASP
-	// https://owasp.org/www-community/OWASP_Validation_Regex_Repository
 	emailPattern := `^[a-zA-Z0-9_+&*-]+(?:\.[a-zA-Z0-9_+&*-]+)*@(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$`
 	match, err := regexp.MatchString(emailPattern, email)
-	if err != nil {
+	if err != nil || !match {
 		return false
 	}
-	return match
+	return true
 }
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
 
-	// Test users
-	var testFakeMockUsers = map[string]string{
+	testFakeMockUsers := map[string]string{
 		"user1@example.com": "password12345",
 		"user2@example.com": "B7rx9OkWVdx13$QF6Imq",
 		"user3@example.com": "hoxnNT4g&ER0&9Nz0pLO",
 		"user4@example.com": "Log4Fun",
 	}
 
-	if r.Method == "POST" {
-
-		decode := json.NewDecoder(r.Body)
-		decode.DisallowUnknownFields()
-
-		err := decode.Decode(&reqBody)
-		if err != nil {
-			http.Error(w, "Cannot decode body", http.StatusBadRequest)
-			return
-		}
-		email := reqBody.Email
-		password := reqBody.Password
-
-		if !isValidEmail(email) {
-			log.Printf("Invalid email format: %q", email)
-			http.Error(w, "Invalid email format", http.StatusBadRequest)
-			return
-		}
-
-		storedPassword, ok := testFakeMockUsers[email]
-		if !ok {
-			http.Error(w, "invalid email or password", http.StatusUnauthorized)
-			return
-		}
-
-		if password == storedPassword {
-			log.Printf("User %q logged in successfully with a valid password %q", email, password)
-			w.WriteHeader(http.StatusOK)
-		} else {
-			http.Error(w, "Invalid Email or Password", http.StatusUnauthorized)
-		}
-
-	} else {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+	if err := decodeRequestBody(r, &reqBody); err != nil {
+		http.Error(w, "Cannot decode body", http.StatusBadRequest)
+		return
 	}
+
+	if !isValidEmail(reqBody.Email) {
+		log.Println("Invalid email format")
+		http.Error(w, "Invalid email format", http.StatusBadRequest)
+		return
+	}
+
+	if !authenticateUser(reqBody.Email, reqBody.Password, testFakeMockUsers) {
+		http.Error(w, "Invalid Email or Password", http.StatusUnauthorized)
+		return
+	}
+
+	log.Println("Successful login request")
+	w.WriteHeader(http.StatusOK)
+}
+
+func decodeRequestBody(r *http.Request, target interface{}) error {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(target)
+}
+
+func authenticateUser(email, password string, users map[string]string) bool {
+	storedPassword, exists := users[email]
+	return exists && storedPassword == password
 }
 
 func main() {
 	http.HandleFunc("/login", loginHandler)
-	log.Print("Server started. Listening on :8080")
-	err := http.ListenAndServe(":8080", nil)
-	if err != nil {
+	log.Println("Server started. Listening on :8080")
+	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatalf("HTTP server ListenAndServe: %q", err)
 	}
 }
